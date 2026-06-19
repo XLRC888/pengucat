@@ -25,7 +25,6 @@
 
 atomic_int *any_key_pressed;
 atomic_int *last_key_code;
-atomic_int *key_held;
 static pid_t input_child_pid = -1;
 static int wake_fd = -1;
 
@@ -123,7 +122,6 @@ static void capture_input_hotplug(char **static_paths, int num_static,
     memset(active_devices[i].path, 0, sizeof(active_devices[i].path));
   }
 
-  int keys_down = 0;
   struct input_event ev[64];
   struct pollfd pfds[MAX_ACTIVE_DEVICES];
   struct timespec last_scan_time = {0, 0};
@@ -313,37 +311,14 @@ static void capture_input_hotplug(char **static_paths, int num_static,
         int code = 0;
 
         for (int k = 0; k < num_events; k++) {
-          if (ev[k].type == EV_KEY) {
-            if (ev[k].value == 1) {
-              code = ev[k].code;
-              key_pressed = true;
-              keys_down++;
-              if (enable_debug) {
-                bongocat_log_debug("Key: %d from %s (down, %d held)", code,
-                                   active_devices[i].path, keys_down);
-              }
-            } else if (ev[k].value == 2) {
-              code = ev[k].code;
-              key_pressed = true;
-              if (enable_debug) {
-                bongocat_log_debug("Key: %d from %s (repeat)", code,
-                                   active_devices[i].path);
-              }
-            } else if (ev[k].value == 0) {
-              if (keys_down > 0) keys_down--;
-              if (enable_debug) {
-                bongocat_log_debug("Key release: %d from %s (%d held)",
-                                   ev[k].code, active_devices[i].path,
-                                   keys_down);
-              }
+          if (ev[k].type == EV_KEY && (ev[k].value == 1 || ev[k].value == 2)) {
+            key_pressed = true;
+            code = ev[k].code;
+            if (enable_debug) {
+              bongocat_log_debug("Key: %d from %s", code,
+                                 active_devices[i].path);
             }
           }
-        }
-
-        if (keys_down > 0) {
-          atomic_store(key_held, 1);
-        } else {
-          atomic_store(key_held, 0);
         }
 
         if (key_pressed) {
@@ -393,16 +368,6 @@ bongocat_error_t input_start_monitoring(char **device_paths, int num_devices,
     munmap(any_key_pressed, sizeof(atomic_int));
     return BONGOCAT_ERROR_MEMORY;
   }
-
-  key_held = alloc_shared_atomic();
-  if (!key_held) {
-    bongocat_log_error("Failed to create shared memory for key held: %s",
-                       strerror(errno));
-    munmap(any_key_pressed, sizeof(atomic_int));
-    munmap(last_key_code, sizeof(atomic_int));
-    return BONGOCAT_ERROR_MEMORY;
-  }
-  atomic_store(key_held, 0);
 
   wake_fd = eventfd(0, EFD_NONBLOCK);
   if (wake_fd < 0) {
@@ -541,10 +506,6 @@ void input_cleanup(void) {
   if (last_key_code && last_key_code != MAP_FAILED) {
     munmap(last_key_code, sizeof(atomic_int));
     last_key_code = NULL;
-  }
-  if (key_held && key_held != MAP_FAILED) {
-    munmap(key_held, sizeof(atomic_int));
-    key_held = NULL;
   }
 
   bongocat_log_debug("Input monitoring cleanup complete");

@@ -206,11 +206,6 @@ static void anim_handle_idle_return(animation_state_t *state,
     return;
   }
 
-  if (atomic_load(key_held)) {
-    state->hold_until = current_time_us + 50000;
-    return;
-  }
-
   if (anim_index != current_config->idle_frame) {
     bongocat_log_debug("Returning to idle frame %d",
                        current_config->idle_frame);

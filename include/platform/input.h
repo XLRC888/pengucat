@@ -14,7 +14,6 @@
 extern atomic_int *any_key_pressed;
 
 extern atomic_int *last_key_code;
-extern atomic_int *key_held;
 
 
 
