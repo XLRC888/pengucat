@@ -158,48 +158,41 @@ static void anim_handle_test_animation(animation_state_t *state,
 }
 
 static void anim_handle_key_press(animation_state_t *state,
-                                  long current_time_us) {
+                                   long current_time_us) {
   if (!atomic_load(any_key_pressed)) {
     return;
   }
 
-  if (!current_config->enable_scheduled_sleep ||
-      !anim_is_sleep_time(current_config)) {
-    int keycode = atomic_load(last_key_code);
-    int new_frame = get_frame_for_keycode(keycode);
+  atomic_store(any_key_pressed, 0);
 
-    if (current_config->mirror_x) {
-      new_frame = (new_frame == 1) ? 2 : 1;
-    }
+  int left = atomic_load(left_paw_active);
+  int right = atomic_load(right_paw_active);
+  int new_frame;
 
-    int current_frame = anim_index;
-    bool is_holding = current_time_us <= state->hold_until &&
-                      (current_frame == 1 || current_frame == 2);
-
-    if (is_holding) {
-      if (new_frame != current_frame) {
-        new_frame = BONGOCAT_FRAME_BOTH_DOWN;
-      } else if (keycode != state->last_held_keycode) {
-        anim_trigger_frame_change(BONGOCAT_FRAME_BOTH_UP, 30000,
-                                  current_time_us, state);
-        atomic_store(any_key_pressed, 0);
-        state->test_counter = 0;
-        state->last_key_pressed_timestamp = current_time_us;
-        return;
-      }
-    }
-
-    state->last_held_keycode = keycode;
-
-    long duration_us = current_config->keypress_duration * 1000;
-
-    bongocat_log_debug("Key press detected - switching to frame %d", new_frame);
-    anim_trigger_frame_change(new_frame, duration_us, current_time_us, state);
-
-    atomic_store(any_key_pressed, 0);
-    state->test_counter = 0;
-    state->last_key_pressed_timestamp = current_time_us;
+  if (left && right) {
+    new_frame = BONGOCAT_FRAME_BOTH_DOWN;
+  } else if (left) {
+    new_frame = BONGOCAT_FRAME_LEFT_DOWN;
+  } else if (right) {
+    new_frame = BONGOCAT_FRAME_RIGHT_DOWN;
+  } else {
+    return;
   }
+
+  if (current_config->mirror_x) {
+    if (new_frame == BONGOCAT_FRAME_LEFT_DOWN)
+      new_frame = BONGOCAT_FRAME_RIGHT_DOWN;
+    else if (new_frame == BONGOCAT_FRAME_RIGHT_DOWN)
+      new_frame = BONGOCAT_FRAME_LEFT_DOWN;
+  }
+
+  if (new_frame != anim_index) {
+    long duration_us = current_config->keypress_duration * 1000;
+    anim_trigger_frame_change(new_frame, duration_us, current_time_us, state);
+  }
+
+  state->test_counter = 0;
+  state->last_key_pressed_timestamp = current_time_us;
 }
 
 static void anim_handle_idle_return(animation_state_t *state,
@@ -229,6 +222,10 @@ static void anim_handle_idle_return(animation_state_t *state,
   }
 
   if (current_time_us <= state->hold_until) {
+    return;
+  }
+
+  if (atomic_load(left_paw_active) || atomic_load(right_paw_active)) {
     return;
   }
 
