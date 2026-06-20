@@ -54,6 +54,7 @@ typedef struct {
   int test_interval_frames;
   long frame_time_ns;
   long last_key_pressed_timestamp;
+  int last_held_keycode;
 } animation_state_t;
 
 static long anim_get_current_time_us(void) {
@@ -164,14 +165,39 @@ static void anim_handle_key_press(animation_state_t *state,
 
   if (!current_config->enable_scheduled_sleep ||
       !anim_is_sleep_time(current_config)) {
-    int new_frame = anim_get_active_frame();
+    int keycode = atomic_load(last_key_code);
+    int new_frame = get_frame_for_keycode(keycode);
+
+    if (current_config->mirror_x) {
+      new_frame = (new_frame == 1) ? 2 : 1;
+    }
+
+    int current_frame = anim_index;
+    bool is_holding = current_time_us <= state->hold_until &&
+                      (current_frame == 1 || current_frame == 2);
+
+    if (is_holding) {
+      if (new_frame != current_frame) {
+        new_frame = BONGOCAT_FRAME_BOTH_DOWN;
+      } else if (keycode != state->last_held_keycode) {
+        anim_trigger_frame_change(BONGOCAT_FRAME_BOTH_UP, 30000,
+                                  current_time_us, state);
+        atomic_store(any_key_pressed, 0);
+        state->test_counter = 0;
+        state->last_key_pressed_timestamp = current_time_us;
+        return;
+      }
+    }
+
+    state->last_held_keycode = keycode;
+
     long duration_us = current_config->keypress_duration * 1000;
 
     bongocat_log_debug("Key press detected - switching to frame %d", new_frame);
     anim_trigger_frame_change(new_frame, duration_us, current_time_us, state);
 
     atomic_store(any_key_pressed, 0);
-    state->test_counter = 0;  
+    state->test_counter = 0;
     state->last_key_pressed_timestamp = current_time_us;
   }
 }
@@ -236,6 +262,7 @@ static void anim_init_state(animation_state_t *state) {
       current_config->test_animation_interval * current_config->fps;
   state->frame_time_ns = 1000000000L / current_config->fps;
   state->last_key_pressed_timestamp = anim_get_current_time_us();
+  state->last_held_keycode = 0;
 }
 
 static void *anim_thread_main([[maybe_unused]] void *arg) {
