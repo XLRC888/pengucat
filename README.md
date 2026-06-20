@@ -27,6 +27,13 @@ cp bongocat.conf.example ~/.config/bongocat/bongocat.conf
 
 ## run it
 
+toggle everything on/off:
+
+```
+./scripts/bongocat-toggle
+```
+run raw cat
+
 ```
 ./build/bongocat
 ```
@@ -41,12 +48,6 @@ key counter (gtk overlay that counts your presses):
 
 ```
 python3 scripts/bongocat-counter
-```
-
-toggle everything on/off:
-
-```
-./scripts/bongocat-toggle
 ```
 
 if steam grabs your input and breaks things:
