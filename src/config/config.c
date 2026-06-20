@@ -685,7 +685,7 @@ static void config_set_defaults(config_t *config) {
       .enable_scheduled_sleep = 0,
       .sleep_begin = (config_time_t){0, 0},
       .sleep_end = (config_time_t){0, 0},
-      .idle_sleep_timeout_sec = 0,
+      .idle_sleep_timeout_sec = 120,
       .disable_fullscreen_hide = 0,
   };
 }

@@ -31,7 +31,7 @@ keypress_duration=100
 enable_hand_mapping=1
 
 
-idle_sleep_timeout=0
+idle_sleep_timeout=120
 
 enable_scheduled_sleep=0
 sleep_begin=22:00
