@@ -1,0 +1,46 @@
+#!/bin/bash
+ICON="$HOME/.local/share/icons/bongocat.svg"
+CONF="$HOME/.config/bongocat/bongocat.conf"
+POSFILE="$HOME/.config/bongocat/position"
+
+notif() {
+    notify-send --wait -i "$ICON" "$@"
+}
+
+apply_pos() {
+    case "$1" in
+        left)
+            sed -i 's/^cat_align=.*/cat_align=left/' "$CONF"
+            echo "left" > "$POSFILE"
+            ;;
+        center)
+            sed -i 's/^cat_align=.*/cat_align=center/' "$CONF"
+            echo "center" > "$POSFILE"
+            ;;
+        right)
+            sed -i 's/^cat_align=.*/cat_align=right/' "$CONF"
+            echo "right" > "$POSFILE"
+            ;;
+    esac
+}
+
+pkill -f "bongocat --watch-config" 2>/dev/null
+pkill -f bongocat-counter 2>/dev/null
+sleep 0.3
+
+choice=$(notif \
+    -A "left=Left Bottom" \
+    -A "center=Center Bottom" \
+    -A "right=Right Bottom" \
+    " Bongo Cat" "where do you want the cat?")
+
+[ -z "$choice" ] && exit 0
+
+apply_pos "$choice"
+notify-send -i "$ICON" "Bongo Cat" "starting on $choice"
+
+export LD_PRELOAD=/usr/lib/libgtk4-layer-shell.so
+bongocat --watch-config &
+sleep 1
+/home/xlrc888/.local/bin/bongocat-counter &
+wait

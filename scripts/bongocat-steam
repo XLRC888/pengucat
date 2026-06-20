@@ -1,0 +1,10 @@
+#!/bin/bash
+export LD_PRELOAD=/usr/lib/libgtk4-layer-shell.so
+pkill -f "bongocat --watch-config" 2>/dev/null || true
+pkill -f bongocat-counter 2>/dev/null || true
+sleep 0.5
+notify-send "Bongo Cat" "starting bongo cat overlay"
+bongocat --watch-config &
+sleep 1
+/home/xlrc888/.local/bin/bongocat-counter &
+wait

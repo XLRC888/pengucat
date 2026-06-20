@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+import gi
+gi.require_version('Gtk', '4.0')
+gi.require_version('Gtk4LayerShell', '1.0')
+from gi.repository import Gtk, Gtk4LayerShell, GLib, Gdk
+import evdev
+import select
+import os
+import sys
+import signal
+import threading
+from pathlib import Path
+
+KEY_DEVICE = '/dev/input/event6'
+CONFIG_DIR = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'bongocat'
+COUNT_FILE = CONFIG_DIR / 'keycount'
+POSITION_FILE = CONFIG_DIR / 'position'
+
+def read_position():
+    try:
+        return POSITION_FILE.read_text().strip()
+    except:
+        return 'right'
+
+key_count = 0
+running = True
+
+def load_count():
+    global key_count
+    try:
+        key_count = int(COUNT_FILE.read_text().strip())
+    except:
+        key_count = 0
+
+def save_count():
+    COUNT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    COUNT_FILE.write_text(str(key_count))
+
+def handle_signal(sig, frame):
+    global running
+    running = False
+    save_count()
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, handle_signal)
+signal.signal(signal.SIGINT, handle_signal)
+
+class KeyCounter(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id='com.bongocat.counter')
+        self.connect('activate', self.on_activate)
+        self.connect('shutdown', self.on_shutdown)
+        self.window = None
+        self.label = None
+        self.icon_label = None
+        self.count = key_count
+
+    def on_shutdown(self, app):
+        save_count()
+
+    def on_activate(self, app):
+        win = Gtk.Window(application=app)
+        win.set_title('Bongo Counter')
+        win.set_default_size(90, 22)
+        win.set_resizable(False)
+        win.set_decorated(False)
+
+        Gtk4LayerShell.init_for_window(win)
+        Gtk4LayerShell.set_layer(win, Gtk4LayerShell.Layer.TOP)
+        Gtk4LayerShell.set_anchor(win, Gtk4LayerShell.Edge.BOTTOM, True)
+        Gtk4LayerShell.set_exclusive_zone(win, 0)
+        Gtk4LayerShell.set_keyboard_mode(win, Gtk4LayerShell.KeyboardMode.NONE)
+
+        align = read_position()
+        if align == 'left':
+            Gtk4LayerShell.set_anchor(win, Gtk4LayerShell.Edge.LEFT, True)
+            Gtk4LayerShell.set_margin(win, Gtk4LayerShell.Edge.LEFT, 36)
+            Gtk4LayerShell.set_margin(win, Gtk4LayerShell.Edge.BOTTOM, 2)
+        elif align == 'center':
+            def re_center(w):
+                mon = w.get_display().get_monitor_at_surface(w.get_surface())
+                if not mon:
+                    return False
+                geo = mon.get_geometry()
+                cw = w.get_width()
+                if cw > 0:
+                    Gtk4LayerShell.set_anchor(w, Gtk4LayerShell.Edge.LEFT, True)
+                    Gtk4LayerShell.set_margin(w, Gtk4LayerShell.Edge.LEFT, (geo.width - cw) // 2)
+                return False
+            win.connect('realize', lambda w: GLib.idle_add(re_center, w))
+            Gtk4LayerShell.set_margin(win, Gtk4LayerShell.Edge.BOTTOM, 2)
+        else:
+            Gtk4LayerShell.set_anchor(win, Gtk4LayerShell.Edge.RIGHT, True)
+            Gtk4LayerShell.set_margin(win, Gtk4LayerShell.Edge.RIGHT, 36)
+            Gtk4LayerShell.set_margin(win, Gtk4LayerShell.Edge.BOTTOM, 2)
+
+        win.set_opacity(0.50)
+
+        css_provider = Gtk.CssProvider()
+        css_data = """
+        window {
+            background-color: rgba(0, 0, 0, 0.3);
+            border-radius: 6px;
+        }
+        label {
+            color: #ffffff;
+            font-size: 11px;
+            font-family: monospace;
+            padding: 1px 6px;
+        }
+        """
+        css_provider.load_from_string(css_data)
+        Gtk.StyleContext.add_provider_for_display(
+            win.get_display(), css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+        self.label = Gtk.Label(label=str(self.count))
+        self.label.set_xalign(0.5)
+
+        win.set_child(self.label)
+        self.window = win
+        win.present()
+
+    def update_counter(self, new_count):
+        self.count = new_count
+        if self.label:
+            self.label.set_text(str(self.count))
+            save_count()
+        return GLib.SOURCE_REMOVE
+
+def input_thread(app):
+    global key_count, running
+    dev = None
+    try:
+        dev = evdev.InputDevice(KEY_DEVICE)
+    except Exception as e:
+        print(f'counter: cant open {KEY_DEVICE}: {e}', file=sys.stderr)
+        try:
+            dev = evdev.InputDevice('/dev/input/event4')
+        except Exception as e2:
+            print(f'counter: cant open event4 either: {e2}', file=sys.stderr)
+            return
+
+    print(f'counter: listening on {dev.path} ({dev.name})', file=sys.stderr)
+    p = select.poll()
+    p.register(dev.fd, select.POLLIN)
+
+    while running:
+        events = p.poll(1000)
+        if not events:
+            continue
+        for fd, _ in events:
+            try:
+                for ev in dev.read():
+                    if ev.type == evdev.ecodes.EV_KEY and ev.value == 1:
+                        key_count += 1
+                        GLib.idle_add(app.update_counter, key_count)
+            except BlockingIOError:
+                pass
+
+    save_count()
+    if dev:
+        dev.close()
+
+if __name__ == '__main__':
+    load_count()
+    app = KeyCounter()
+    t = threading.Thread(target=input_thread, args=(app,), daemon=False)
+    t.start()
+    app.run(None)
+    save_count()

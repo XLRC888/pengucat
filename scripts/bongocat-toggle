@@ -1,0 +1,9 @@
+#!/bin/bash
+export LD_PRELOAD=/usr/lib/libgtk4-layer-shell.so
+if pgrep -f "bongocat --watch-config" > /dev/null; then
+    pkill -f "bongocat --watch-config"
+    pkill -f bongocat-counter
+    notify-send "Bongo Cat" "stopped"
+else
+    exec /home/xlrc888/.local/bin/bongocat-menu
+fi
