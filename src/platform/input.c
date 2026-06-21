@@ -27,6 +27,8 @@ atomic_int *any_key_pressed;
 atomic_int *last_key_code;
 atomic_int *left_paw_active;
 atomic_int *right_paw_active;
+atomic_int *prev_left_paw_active;
+atomic_int *prev_right_paw_active;
 static int left_held_cnt = 0;
 static int right_held_cnt = 0;
 static pid_t input_child_pid = -1;
@@ -98,6 +100,7 @@ static bool is_left_key(int code) {
   static const int left[] = {
     2,3,4,5,6,7,16,17,18,19,20,30,31,32,33,34,
     44,45,46,47,48,1,15,58,42,29,56,41,125,
+    59,60,61,62,63,64,
   };
   for (size_t i = 0; i < sizeof(left)/sizeof(left[0]); i++) {
     if (code == left[i]) return 1;
@@ -327,14 +330,16 @@ static void capture_input_hotplug(char **static_paths, int num_static,
           if (ev[k].type != EV_KEY) continue;
           int code = ev[k].code;
 
-          if (ev[k].value == 1 || ev[k].value == 2) {
+          if (ev[k].value == 1) {
+            atomic_store(prev_left_paw_active, atomic_load(left_paw_active));
+            atomic_store(prev_right_paw_active, atomic_load(right_paw_active));
             atomic_store(last_key_code, code);
             if (is_left_key(code)) {
-              if (left_held_cnt == 0) atomic_store(left_paw_active, 1);
               left_held_cnt++;
+              if (left_held_cnt == 1) atomic_store(left_paw_active, 1);
             } else {
-              if (right_held_cnt == 0) atomic_store(right_paw_active, 1);
               right_held_cnt++;
+              if (right_held_cnt == 1) atomic_store(right_paw_active, 1);
             }
             if (enable_debug) {
               bongocat_log_debug("Key press: %d from %s", code,
@@ -345,6 +350,8 @@ static void capture_input_hotplug(char **static_paths, int num_static,
               uint64_t val = 1;
               if (write(wake_fd, &val, sizeof(val)) < 0) {}
             }
+          } else if (ev[k].value == 2) {
+            atomic_store(last_key_code, code);
           } else if (ev[k].value == 0) {
             if (is_left_key(code)) {
               left_held_cnt--;
@@ -362,11 +369,6 @@ static void capture_input_hotplug(char **static_paths, int num_static,
             if (enable_debug) {
               bongocat_log_debug("Key release: %d from %s", code,
                                  active_devices[i].path);
-            }
-            animation_trigger();
-            if (wake_fd >= 0) {
-              uint64_t val = 1;
-              if (write(wake_fd, &val, sizeof(val)) < 0) {}
             }
           }
         }
@@ -428,6 +430,29 @@ bongocat_error_t input_start_monitoring(char **device_paths, int num_devices,
     return BONGOCAT_ERROR_MEMORY;
   }
 
+  prev_left_paw_active = alloc_shared_atomic();
+  if (!prev_left_paw_active) {
+    bongocat_log_error("Failed to create shared memory for paw state: %s",
+                       strerror(errno));
+    munmap(any_key_pressed, sizeof(atomic_int));
+    munmap(last_key_code, sizeof(atomic_int));
+    munmap(left_paw_active, sizeof(atomic_int));
+    munmap(right_paw_active, sizeof(atomic_int));
+    return BONGOCAT_ERROR_MEMORY;
+  }
+
+  prev_right_paw_active = alloc_shared_atomic();
+  if (!prev_right_paw_active) {
+    bongocat_log_error("Failed to create shared memory for paw state: %s",
+                       strerror(errno));
+    munmap(any_key_pressed, sizeof(atomic_int));
+    munmap(last_key_code, sizeof(atomic_int));
+    munmap(left_paw_active, sizeof(atomic_int));
+    munmap(right_paw_active, sizeof(atomic_int));
+    munmap(prev_left_paw_active, sizeof(atomic_int));
+    return BONGOCAT_ERROR_MEMORY;
+  }
+
   wake_fd = eventfd(0, EFD_NONBLOCK);
   if (wake_fd < 0) {
     bongocat_log_warning(
@@ -443,10 +468,14 @@ bongocat_error_t input_start_monitoring(char **device_paths, int num_devices,
     munmap(last_key_code, sizeof(atomic_int));
     munmap(left_paw_active, sizeof(atomic_int));
     munmap(right_paw_active, sizeof(atomic_int));
+    munmap(prev_left_paw_active, sizeof(atomic_int));
+    munmap(prev_right_paw_active, sizeof(atomic_int));
     any_key_pressed = NULL;
     last_key_code = NULL;
     left_paw_active = NULL;
     right_paw_active = NULL;
+    prev_left_paw_active = NULL;
+    prev_right_paw_active = NULL;
     if (wake_fd >= 0) {
       close(wake_fd);
       wake_fd = -1;
@@ -552,7 +581,66 @@ bongocat_error_t input_restart_monitoring(char **device_paths, int num_devices,
     }
   }
 
-  
+  bool need_new_prev_left =
+      (prev_left_paw_active == NULL || prev_left_paw_active == MAP_FAILED);
+
+  if (need_new_prev_left) {
+    prev_left_paw_active = alloc_shared_atomic();
+    if (!prev_left_paw_active) {
+      bongocat_log_error("Failed to create shared memory for paw state: %s",
+                         strerror(errno));
+      if (need_new_shm) {
+        munmap(any_key_pressed, sizeof(atomic_int));
+        any_key_pressed = NULL;
+      }
+      if (need_new_key_shm) {
+        munmap(last_key_code, sizeof(atomic_int));
+        last_key_code = NULL;
+      }
+      if (need_new_left) {
+        munmap(left_paw_active, sizeof(atomic_int));
+        left_paw_active = NULL;
+      }
+      if (need_new_right) {
+        munmap(right_paw_active, sizeof(atomic_int));
+        right_paw_active = NULL;
+      }
+      return BONGOCAT_ERROR_MEMORY;
+    }
+  }
+
+  bool need_new_prev_right =
+      (prev_right_paw_active == NULL || prev_right_paw_active == MAP_FAILED);
+
+  if (need_new_prev_right) {
+    prev_right_paw_active = alloc_shared_atomic();
+    if (!prev_right_paw_active) {
+      bongocat_log_error("Failed to create shared memory for paw state: %s",
+                         strerror(errno));
+      if (need_new_shm) {
+        munmap(any_key_pressed, sizeof(atomic_int));
+        any_key_pressed = NULL;
+      }
+      if (need_new_key_shm) {
+        munmap(last_key_code, sizeof(atomic_int));
+        last_key_code = NULL;
+      }
+      if (need_new_left) {
+        munmap(left_paw_active, sizeof(atomic_int));
+        left_paw_active = NULL;
+      }
+      if (need_new_right) {
+        munmap(right_paw_active, sizeof(atomic_int));
+        right_paw_active = NULL;
+      }
+      if (need_new_prev_left) {
+        munmap(prev_left_paw_active, sizeof(atomic_int));
+        prev_left_paw_active = NULL;
+      }
+      return BONGOCAT_ERROR_MEMORY;
+    }
+  }
+
   if (wake_fd >= 0) {
     close(wake_fd);
   }
@@ -581,6 +669,14 @@ bongocat_error_t input_restart_monitoring(char **device_paths, int num_devices,
     if (need_new_right) {
       munmap(right_paw_active, sizeof(atomic_int));
       right_paw_active = NULL;
+    }
+    if (need_new_prev_left) {
+      munmap(prev_left_paw_active, sizeof(atomic_int));
+      prev_left_paw_active = NULL;
+    }
+    if (need_new_prev_right) {
+      munmap(prev_right_paw_active, sizeof(atomic_int));
+      prev_right_paw_active = NULL;
     }
     return BONGOCAT_ERROR_THREAD;
   }
@@ -629,6 +725,14 @@ void input_cleanup(void) {
   if (right_paw_active && right_paw_active != MAP_FAILED) {
     munmap(right_paw_active, sizeof(atomic_int));
     right_paw_active = NULL;
+  }
+  if (prev_left_paw_active && prev_left_paw_active != MAP_FAILED) {
+    munmap(prev_left_paw_active, sizeof(atomic_int));
+    prev_left_paw_active = NULL;
+  }
+  if (prev_right_paw_active && prev_right_paw_active != MAP_FAILED) {
+    munmap(prev_right_paw_active, sizeof(atomic_int));
+    prev_right_paw_active = NULL;
   }
 
   bongocat_log_debug("Input monitoring cleanup complete");

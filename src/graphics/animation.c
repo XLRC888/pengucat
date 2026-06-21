@@ -104,8 +104,9 @@ static int get_frame_for_keycode(int keycode) {
     56,                         
     41,                         
     125,                        
+      59, 60, 61, 62, 63, 64,   
   };
-  
+
 
   for (size_t i = 0; i < sizeof(left_keys) / sizeof(left_keys[0]); i++) {
     if (keycode == left_keys[i]) {
@@ -167,9 +168,15 @@ static void anim_handle_key_press(animation_state_t *state,
 
   int left = atomic_load(left_paw_active);
   int right = atomic_load(right_paw_active);
+  int prev_left = atomic_load(prev_left_paw_active);
+  int prev_right = atomic_load(prev_right_paw_active);
   int new_frame;
 
-  if (left && right) {
+  if (prev_left && !prev_right) {
+    new_frame = BONGOCAT_FRAME_BOTH_DOWN;
+  } else if (prev_right && !prev_left) {
+    new_frame = BONGOCAT_FRAME_BOTH_DOWN;
+  } else if (left && right) {
     new_frame = BONGOCAT_FRAME_BOTH_DOWN;
   } else if (left) {
     new_frame = BONGOCAT_FRAME_LEFT_DOWN;
@@ -225,7 +232,23 @@ static void anim_handle_idle_return(animation_state_t *state,
     return;
   }
 
-  if (atomic_load(left_paw_active) || atomic_load(right_paw_active)) {
+  int l = atomic_load(left_paw_active);
+  int r = atomic_load(right_paw_active);
+
+  if (l && !r) {
+    if (anim_index != BONGOCAT_FRAME_LEFT_DOWN) {
+      anim_trigger_frame_change(BONGOCAT_FRAME_LEFT_DOWN, 0, current_time_us, state);
+    }
+    return;
+  }
+  if (r && !l) {
+    if (anim_index != BONGOCAT_FRAME_RIGHT_DOWN) {
+      anim_trigger_frame_change(BONGOCAT_FRAME_RIGHT_DOWN, 0, current_time_us, state);
+    }
+    return;
+  }
+
+  if (l || r) {
     return;
   }
 

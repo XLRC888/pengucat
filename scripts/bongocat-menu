@@ -32,7 +32,7 @@ choice=$(notif \
     -A "left=Left Bottom" \
     -A "center=Center Bottom" \
     -A "right=Right Bottom" \
-    " Bongo Cat" "where do you want the cat?")
+    "Bongo Cat" "where do you want the cat?")
 
 [ -z "$choice" ] && exit 0
 

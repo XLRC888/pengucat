@@ -19,6 +19,10 @@ extern atomic_int *left_paw_active;
 
 extern atomic_int *right_paw_active;
 
+extern atomic_int *prev_left_paw_active;
+
+extern atomic_int *prev_right_paw_active;
+
 
 
 
